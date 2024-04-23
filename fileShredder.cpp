@@ -2,50 +2,54 @@
 #include <fstream>
 #include <cstdlib>
 #include <ctime>
-#include <sys/stat.h>
-#include <string>
-#include <vector>
 #include <filesystem>
+#include <random>
 
 namespace fs = std::filesystem;
 
-bool isDirectory(const std::string& path) {
-    struct stat info;
-    if (stat(path.c_str(), &info) != 0) {
-        return false;
-    }
-    return (info.st_mode & S_IFDIR);
+bool isDirectory(const fs::path& path) {
+    return fs::is_directory(path);
 }
 
-void overwriteFile(const std::string& filename, int numOverwrites) {
-    std::ofstream file(filename, std::ios::out | std::ios::binary);
+void overwriteFile(const fs::path& filename, int numOverwrites) {
+    std::streampos fileSize = fs::file_size(filename);
+    std::ofstream file(filename, std::ios::out | std::ios::binary | std::ios::trunc);
 
     if (!file.is_open()) {
         std::cerr << "Failed to open the file for overwriting." << std::endl;
         return;
     }
 
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, 255);
+
+    const int bufferSize = 1024;
+    char buffer[bufferSize];
+
     for (int i = 0; i < numOverwrites; ++i) {
-        const int bufferSize = 1024;
-        char buffer[bufferSize];
-        for (int j = 0; j < bufferSize; ++j) {
-            buffer[j] = rand() % 256;
+        std::streampos written = 0;
+        while (written < fileSize) {
+            int currentWriteSize = std::min(bufferSize, static_cast<int>(fileSize - written));
+            for (int j = 0; j < currentWriteSize; ++j) {
+                buffer[j] = static_cast<char>(dis(gen));
+            }
+            file.write(buffer, currentWriteSize);
+            written += currentWriteSize;
         }
-
-        file.write(buffer, bufferSize);
+        file.seekp(0, std::ios::beg);
     }
-
     file.close();
 }
 
-void shredPath(const std::string& path, int numOverwrites) {
+void shredPath(const fs::path& path, int numOverwrites) {
     if (isDirectory(path)) {
         for (const auto& entry : fs::directory_iterator(path)) {
-            shredPath(entry.path().string(), numOverwrites);
+            shredPath(entry.path(), numOverwrites);
         }
     } else {
         overwriteFile(path, numOverwrites);
-        if (remove(path.c_str()) != 0) {
+        if (fs::remove(path) == false) {
             std::cerr << "Failed to delete the file: " << path << std::endl;
         } else {
             std::cout << "File has been securely shredded: " << path << std::endl;
